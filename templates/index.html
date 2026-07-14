@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERROR 404 AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#07070a;
+    --panel:#0d0d12;
+    --panel-2:#121218;
+    --line:#212129;
+    --red:#ff2140;
+    --red-soft:rgba(255,33,64,0.12);
+    --cyan:#23e5ff;
+    --cyan-soft:rgba(35,229,255,0.1);
+    --ink:#e9e9ee;
+    --ink-dim:#83838f;
+    --grad:linear-gradient(135deg, var(--red), var(--cyan));
+    --mono:'JetBrains Mono', monospace;
+    --glitch:'Share Tech Mono', monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:var(--mono); background:var(--void); color:var(--ink);
+    height:100vh; overflow:hidden; position:relative;
+  }
+  @media (prefers-reduced-motion: reduce){ *{animation-duration:.01ms !important; transition-duration:.01ms !important;} }
+
+  /* ---------- atmosphere ---------- */
+  #rain{position:fixed; inset:0; z-index:0; opacity:0.32;}
+  .scanlines{position:fixed; inset:0; z-index:1; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.28) 3px, rgba(0,0,0,0) 4px);
+    mix-blend-mode:overlay;}
+  .vignette{position:fixed; inset:0; z-index:1; pointer-events:none;
+    background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.65) 100%);}
+
+  /* ---------- topbar ---------- */
+  .topbar{
+    height:60px; display:flex; align-items:center; justify-content:space-between; padding:0 20px;
+    border-bottom:1px solid var(--line); background:rgba(13,13,18,0.85); backdrop-filter:blur(8px);
+    position:relative; z-index:10;
+  }
+  .left-group{display:flex; align-items:center; gap:14px;}
+  .menu-btn{
+    width:38px; height:38px; border-radius:10px; border:1px solid var(--line); background:var(--panel-2); color:var(--ink);
+    font-size:16px; letter-spacing:2px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition:border-color .15s, color .15s;
+  }
+  .menu-btn:hover{border-color:var(--red); color:var(--red);}
+  .logo{display:flex; align-items:center; gap:9px; font-family:var(--glitch); font-size:14px; letter-spacing:1px;}
+  .logo .mark{
+    width:32px; height:32px; border-radius:9px; background:var(--grad); flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; color:#050507; font-family:var(--mono); font-size:11px; font-weight:700;
+    box-shadow:0 0 16px rgba(255,33,64,0.35);
+  }
+  .badge{
+    font-family:var(--mono); font-size:10.5px; color:var(--cyan); background:var(--cyan-soft);
+    border:1px solid rgba(35,229,255,0.25); padding:6px 12px; border-radius:20px; display:flex; align-items:center; gap:6px;
+  }
+  .badge .pulse{width:6px; height:6px; border-radius:50%; background:var(--cyan); animation:pulse 1.6s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.25;}}
+
+  /* ---------- drawer ---------- */
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,0.55); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:20;}
+  .overlay.open{opacity:1; pointer-events:auto;}
+  .drawer{
+    position:fixed; top:0; left:0; height:100vh; width:300px; background:var(--panel);
+    border-right:1px solid var(--line); box-shadow:16px 0 50px rgba(0,0,0,0.5);
+    transform:translateX(-100%); transition:transform .25s ease; z-index:21; padding:20px 16px; display:flex; flex-direction:column;
+  }
+  .drawer.open{transform:translateX(0);}
+  .drawer-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;}
+  .close-btn{background:none; border:none; font-size:18px; color:var(--ink-dim); cursor:pointer;}
+  .new-chat{
+    display:flex; align-items:center; justify-content:center; gap:8px; background:var(--grad); color:#050507;
+    border:none; border-radius:12px; padding:12px; font-family:var(--mono); font-weight:700; font-size:13px;
+    cursor:pointer; box-shadow:0 6px 18px rgba(255,33,64,0.25);
+  }
+  .history{margin-top:18px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; max-height:26vh;}
+  .history .label, .access .label{font-size:10.5px; color:var(--ink-dim); letter-spacing:2px; text-transform:uppercase; margin:6px 4px;}
+  .hist-item{padding:9px 10px; border-radius:9px; font-size:13px; cursor:pointer; color:var(--ink);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .hist-item:hover{background:var(--panel-2);}
+  .hist-item.active{background:var(--red-soft); color:var(--red);}
+
+  .access{margin-top:20px; padding-top:16px; border-top:1px solid var(--line);}
+  .access-status{
+    font-size:12px; color:var(--ink-dim); background:var(--panel-2); border:1px solid var(--line);
+    border-radius:10px; padding:10px 12px; margin-bottom:10px;
+  }
+  .access-status b{color:var(--cyan);}
+  .access input{
+    width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--void);
+    color:var(--ink); font-family:var(--mono); font-size:12.5px; letter-spacing:0.5px; outline:none; margin-bottom:8px;
+  }
+  .access input:focus{border-color:var(--cyan);}
+  .access button{
+    width:100%; padding:10px; border-radius:10px; border:1px solid var(--red); background:transparent; color:var(--red);
+    font-family:var(--mono); font-weight:700; font-size:12px; letter-spacing:1px; cursor:pointer; transition:all .15s;
+  }
+  .access button:hover{background:var(--red); color:#050507;}
+  .access-error{color:var(--red); font-size:11px; margin-top:8px; min-height:14px;}
+  .drawer-foot{font-size:10.5px; color:var(--ink-dim); letter-spacing:2px; padding-top:14px; margin-top:auto; border-top:1px solid var(--line);}
+
+  /* ---------- main ---------- */
+  .main{height:calc(100vh - 60px); display:flex; flex-direction:column; position:relative; z-index:3;}
+  .chat-area{flex:1; overflow-y:auto; display:flex; flex-direction:column;}
+
+  .welcome{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px;}
+  .glitchwrap{position:relative; display:inline-block; overflow:hidden;}
+  .glitchwrap::after{
+    content:''; position:absolute; top:0; left:-60%; width:40%; height:100%;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,0.55) 45%, rgba(35,229,255,0.35) 55%, transparent);
+    transform:skewX(-20deg); animation:shine-sweep 3.4s ease-in-out infinite; pointer-events:none; mix-blend-mode:overlay;
+  }
+  @keyframes shine-sweep{0%{left:-60%;} 35%{left:130%;} 100%{left:130%;}}
+  .glitch{
+    font-family:var(--glitch); font-size:clamp(32px,6vw,58px); letter-spacing:1px; color:var(--ink); position:relative;
+    animation:glitch-jitter 6s infinite;
+  }
+  @keyframes glitch-jitter{
+    0%,92%,100%{transform:translate(0,0); filter:none;}
+    93%{transform:translate(-3px,1px); filter:brightness(1.4);}
+    94%{transform:translate(2px,-1px);}
+    95%{transform:translate(-1px,0); filter:brightness(1.2);}
+    96%{transform:translate(1px,1px);}
+    97%{transform:translate(0,0);}
+  }
+  .glitch::before, .glitch::after{content:attr(data-text); position:absolute; left:0; top:0; width:100%; overflow:hidden; background:var(--void);}
+  .glitch::before{color:var(--cyan); clip-path:inset(0 0 55% 0); animation:glitch-top 3.2s infinite linear alternate-reverse;}
+  .glitch::after{color:var(--red); clip-path:inset(55% 0 0 0); animation:glitch-bot 2.6s infinite linear alternate-reverse;}
+  @keyframes glitch-top{0%{transform:translate(0,0);}20%{transform:translate(2px,1px);}40%{transform:translate(-2px,0);}60%{transform:translate(2px,-1px);}80%{transform:translate(-1px,1px);}100%{transform:translate(0,0);}}
+  @keyframes glitch-bot{0%{transform:translate(0,0);}25%{transform:translate(-3px,0);}50%{transform:translate(2px,-1px);}75%{transform:translate(-2px,1px);}100%{transform:translate(0,0);}}
+  .welcome p#welcomeSub{color:var(--ink-dim); font-size:13.5px; margin-top:16px; letter-spacing:0.5px;}
+
+  .chat-inner{max-width:720px; margin:0 auto; width:100%; padding:24px 20px; display:flex; flex-direction:column; gap:20px;}
+  .msg{display:flex; gap:12px; opacity:0; transform:translateY(14px); animation:slideIn .4s ease forwards;}
+  @keyframes slideIn{to{opacity:1; transform:translateY(0);}}
+  .avatar{width:30px; height:30px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:10px; font-weight:700; color:#050507;}
+  .msg.bot .avatar{background:var(--grad);}
+  .msg.user{flex-direction:row-reverse; margin-left:auto;}
+  .msg.user .avatar{background:var(--panel-2); color:var(--ink); border:1px solid var(--line);}
+  .bubble{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px 16px; font-size:13.5px;
+    line-height:1.65; max-width:500px; color:var(--ink);}
+  .msg.user .bubble{background:var(--panel-2);}
+  .attach-preview{display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;}
+  .file-chip{display:flex; align-items:center; gap:6px; background:var(--void); border:1px solid var(--line);
+    border-radius:9px; padding:6px 10px; font-size:11.5px; color:var(--ink-dim);}
+  .img-thumb{width:120px; height:80px; object-fit:cover; border-radius:9px; border:1px solid var(--line);}
+
+  /* ---------- composer ---------- */
+  .composer-wrap{padding:16px 20px 22px; position:relative; z-index:3;}
+  .composer{
+    max-width:720px; margin:0 auto; background:var(--panel); border:1px solid var(--line); border-radius:20px;
+    padding:8px 10px; box-shadow:0 0 40px rgba(255,33,64,0.05), 0 0 60px rgba(35,229,255,0.03);
+  }
+  #previewRow{display:flex; gap:8px; flex-wrap:wrap; padding:6px 6px 8px;}
+  .preview-chip{position:relative; display:flex; align-items:center; gap:6px; background:var(--panel-2); border:1px solid var(--line);
+    border-radius:10px; padding:6px 10px 6px 8px; font-size:11.5px; color:var(--ink-dim);}
+  .preview-chip img{width:26px; height:26px; object-fit:cover; border-radius:6px;}
+  .preview-chip .rm{cursor:pointer; color:var(--red); font-weight:700; margin-left:4px;}
+  .composer-row{display:flex; align-items:flex-end; gap:6px;}
+  .icon-btn{
+    width:38px; height:38px; border-radius:11px; border:1px solid var(--line); background:var(--panel-2); color:var(--ink-dim); font-size:16px;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:border-color .15s, color .15s;
+  }
+  .icon-btn:hover{border-color:var(--cyan); color:var(--cyan);}
+  #textInput{
+    flex:1; border:none; outline:none; resize:none; font-family:var(--mono); font-size:13.5px; background:transparent;
+    max-height:160px; padding:9px 6px; color:var(--ink); line-height:1.5;
+  }
+  #textInput::placeholder{color:var(--ink-dim);}
+  .send-btn{
+    width:40px; height:40px; border-radius:12px; border:none; background:var(--grad); color:#050507; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 0 18px rgba(255,33,64,0.35);
+  }
+  .hint{text-align:center; font-size:10.5px; color:var(--ink-dim); margin-top:10px; letter-spacing:0.5px;}
+</style>
+</head>
+<body>
+
+<canvas id="rain"></canvas>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<div class="overlay" id="overlay"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div class="logo"><div class="mark">E4</div> ERROR 404 AI</div>
+    <button class="close-btn" id="closeDrawer">✕</button>
+  </div>
+  <button class="new-chat" id="newChatBtn">+ Nouvelle conversation</button>
+
+  <div class="history">
+    <div class="label">Récents</div>
+    <div class="hist-item active">Site ERROR 404 AI</div>
+    <div class="hist-item">Correction script Python</div>
+    <div class="hist-item">Idées de logo</div>
+  </div>
+
+  <div class="access">
+    <div class="label">Accès créateur</div>
+    <div class="access-status" id="accessStatus">Non connecté — accès invité</div>
+    <input type="text" id="codeInput" placeholder="Code d'accès (CID / SAD)" autocomplete="off">
+    <button id="codeBtn">Se connecter</button>
+    <div class="access-error" id="codeError"></div>
+  </div>
+
+  <div class="drawer-foot">CID × SAD</div>
+</div>
+
+<div class="topbar">
+  <div class="left-group">
+    <button class="menu-btn" id="menuBtn">•••</button>
+    <div class="logo"><div class="mark">E4</div> ERROR 404 AI</div>
+  </div>
+  <div class="badge"><span class="pulse"></span>en ligne</div>
+</div>
+
+<div class="main">
+  <div class="chat-area" id="chatArea">
+    <div class="welcome" id="welcome">
+      <div class="glitchwrap"><h1 class="glitch" data-text="ERROR 404 AI">ERROR 404 AI</h1></div>
+      <p id="welcomeSub">Bienvenue — comment puis-je vous aider aujourd'hui ?</p>
+    </div>
+    <div class="chat-inner" id="chatInner" style="display:none;"></div>
+  </div>
+
+  <div class="composer-wrap">
+    <div class="composer">
+      <div id="previewRow"></div>
+      <div class="composer-row">
+        <button class="icon-btn" id="imgBtn" title="Joindre une image / capture d'écran">🖼️</button>
+        <button class="icon-btn" id="fileBtn" title="Joindre un fichier">🗄️</button>
+        <textarea id="textInput" rows="1" placeholder="Écris un message..."></textarea>
+        <button class="send-btn" id="sendBtn" title="Envoyer">➤</button>
+      </div>
+    </div>
+    <div class="hint">ERROR 404 AI peut se tromper. Vérifie les informations importantes.</div>
+    <input type="file" id="fileInput" accept="*/*" multiple hidden>
+    <input type="file" id="imgInput" accept="image/*" multiple hidden>
+  </div>
+</div>
+
+<script>
+  // binary rain background
+  const canvas = document.getElementById('rain');
+  const ctx = canvas.getContext('2d');
+  let w,h,cols,drops;
+  function resize(){
+    w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight;
+    cols = Math.floor(w/22); drops = new Array(cols).fill(0).map(()=> Math.random()*-h/22);
+  }
+  resize(); window.addEventListener('resize', resize);
+  const glyphs = '01ERROR404';
+  function draw(){
+    ctx.fillStyle = 'rgba(7,7,10,0.14)'; ctx.fillRect(0,0,w,h);
+    ctx.font = '14px monospace';
+    for(let i=0;i<cols;i++){
+      const isRed = Math.random() > 0.85;
+      ctx.fillStyle = isRed ? 'rgba(255,33,64,0.45)' : 'rgba(35,229,255,0.28)';
+      ctx.fillText(glyphs[Math.floor(Math.random()*glyphs.length)], i*22, drops[i]*22);
+      if(drops[i]*22 > h && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    }
+  }
+  setInterval(draw, 60);
+
+  // ---------- access code (in drawer) ----------
+  // La verification reelle se fait cote serveur (/api/auth), contre un hash bcrypt.
+  // Le front n'a jamais connaissance des codes eux-memes.
+  const codeInput = document.getElementById('codeInput');
+  const codeBtn = document.getElementById('codeBtn');
+  const codeError = document.getElementById('codeError');
+  const accessStatus = document.getElementById('accessStatus');
+  const welcomeSub = document.getElementById('welcomeSub');
+  const badge = document.querySelector('.badge');
+
+  async function tryLogin(){
+    const val = codeInput.value.trim();
+    if(!val) return;
+    codeBtn.disabled = true;
+    try{
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: val })
+      });
+      const data = await res.json();
+      if(res.ok && data.ok){
+        accessStatus.innerHTML = `Connecté en tant que <b>${data.name}</b> — accès créateur`;
+        welcomeSub.textContent = `Bienvenue ${data.name}, comment puis-je vous aider aujourd'hui ?`;
+        badge.innerHTML = `<span class="pulse"></span>${data.name} · créateur`;
+        codeError.textContent = '';
+        codeInput.value = '';
+      } else {
+        codeError.textContent = data.error || 'Code invalide.';
+      }
+    } catch(err){
+      codeError.textContent = 'Connexion au serveur impossible.';
+    } finally {
+      codeBtn.disabled = false;
+    }
+  }
+  codeBtn.addEventListener('click', tryLogin);
+  codeInput.addEventListener('keydown', e => { if(e.key === 'Enter') tryLogin(); });
+
+  // ---------- drawer ----------
+  const menuBtn = document.getElementById('menuBtn');
+  const closeDrawer = document.getElementById('closeDrawer');
+  const drawer = document.getElementById('drawer');
+  const overlay = document.getElementById('overlay');
+  function openDrawer(){ drawer.classList.add('open'); overlay.classList.add('open'); }
+  function shutDrawer(){ drawer.classList.remove('open'); overlay.classList.remove('open'); }
+  menuBtn.addEventListener('click', openDrawer);
+  closeDrawer.addEventListener('click', shutDrawer);
+  overlay.addEventListener('click', shutDrawer);
+
+  // ---------- chat ----------
+  const welcome = document.getElementById('welcome');
+  const chatInner = document.getElementById('chatInner');
+  const chatArea = document.getElementById('chatArea');
+  const textInput = document.getElementById('textInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const previewRow = document.getElementById('previewRow');
+  const fileBtn = document.getElementById('fileBtn');
+  const imgBtn = document.getElementById('imgBtn');
+  const fileInput = document.getElementById('fileInput');
+  const imgInput = document.getElementById('imgInput');
+  let pending = [];
+
+  textInput.addEventListener('input', () => {
+    textInput.style.height = 'auto';
+    textInput.style.height = Math.min(textInput.scrollHeight, 160) + 'px';
+  });
+  fileBtn.addEventListener('click', () => fileInput.click());
+  imgBtn.addEventListener('click', () => imgInput.click());
+
+  function addPending(files, type){
+    [...files].forEach(f => {
+      pending.push({ type, name: f.name, file: f, url: type === 'image' ? URL.createObjectURL(f) : null });
+      renderPreview();
+    });
+  }
+  fileInput.addEventListener('change', e => addPending(e.target.files, 'file'));
+  imgInput.addEventListener('change', e => addPending(e.target.files, 'image'));
+
+  function renderPreview(){
+    previewRow.innerHTML = '';
+    pending.forEach((p, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'preview-chip';
+      chip.innerHTML = (p.type === 'image' ? `<img src="${p.url}">` : '📄') +
+        `<span>${p.name.length > 18 ? p.name.slice(0,16)+'…' : p.name}</span><span class="rm" data-i="${i}">×</span>`;
+      previewRow.appendChild(chip);
+    });
+    previewRow.querySelectorAll('.rm').forEach(el => {
+      el.addEventListener('click', () => { pending.splice(+el.dataset.i, 1); renderPreview(); });
+    });
+  }
+
+  function addMsg(text, cls, attachments = []){
+    if(welcome.style.display !== 'none'){ welcome.style.display = 'none'; chatInner.style.display = 'flex'; }
+    const div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    let attachHtml = '';
+    if(attachments.length){
+      attachHtml = '<div class="attach-preview">' + attachments.map(a =>
+        a.type === 'image' ? `<img class="img-thumb" src="${a.url}">` : `<div class="file-chip">📄 ${a.name}</div>`
+      ).join('') + '</div>';
+    }
+    div.innerHTML = `<div class="avatar">${cls === 'bot' ? 'E4' : 'TOI'}</div><div class="bubble">${attachHtml}${text || ''}</div>`;
+    chatInner.appendChild(div);
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
+
+  function addTypingIndicator(){
+    const div = document.createElement('div');
+    div.className = 'msg bot';
+    div.id = 'typingIndicator';
+    div.innerHTML = `<div class="avatar">E4</div><div class="bubble">…</div>`;
+    chatInner.appendChild(div);
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
+  function removeTypingIndicator(){
+    const el = document.getElementById('typingIndicator');
+    if(el) el.remove();
+  }
+
+  async function handleSend(){
+    const text = textInput.value.trim();
+    if(!text && pending.length === 0) return;
+
+    const attachmentsForDisplay = pending;
+    addMsg(text, 'user', attachmentsForDisplay);
+
+    const formData = new FormData();
+    formData.append('message', text);
+    pending.forEach(p => { if(p.file) formData.append('files', p.file); });
+
+    pending = []; renderPreview();
+    textInput.value = ''; textInput.style.height = 'auto';
+    addTypingIndicator();
+
+    try{
+      const res = await fetch('/api/chat', { method: 'POST', body: formData });
+      const data = await res.json();
+      removeTypingIndicator();
+      if(res.ok){
+        addMsg(data.reply, 'bot');
+      } else {
+        addMsg(`Erreur : ${data.error || 'quelque chose s\'est mal passé.'}`, 'bot');
+      }
+    } catch(err){
+      removeTypingIndicator();
+      addMsg("Impossible de contacter le serveur ERROR 404 AI.", 'bot');
+    }
+  }
+  sendBtn.addEventListener('click', handleSend);
+  textInput.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); handleSend(); } });
+
+  document.getElementById('newChatBtn').addEventListener('click', () => {
+    chatInner.innerHTML = ''; chatInner.style.display = 'none'; welcome.style.display = 'flex';
+    shutDrawer();
+  });
+</script>
+
+</body>
+</html>
