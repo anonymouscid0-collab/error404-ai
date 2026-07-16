@@ -137,7 +137,7 @@ Apres quelques minutes, Render te donne une URL du type `https://error404-ai.onr
 **Limite du plan gratuit Render :** le service s'endort apres 15 minutes sans visite et met quelques secondes a se reveiller au prochain message — normal sur le plan gratuit, pas un bug.
 
 
-- Les codes d'acces ne sont **jamais** stockes en clair : seul leur hash bcrypt vit dans `.env`.
+- Les codes d'acces ne sont **jamais** stockes en clair : seul leur hash sale (pbkdf2/sha256, via `hashlib` — aucune compilation native requise) vit dans `.env`.
 - `.env` ne doit **jamais** etre partage ni pousse sur GitHub — ajoute-le a `.gitignore`.
 - Pour un usage prolonge/public, remplace `app.run(debug=True)` par un vrai serveur WSGI (ex: `waitress` fonctionne bien sous Termux) et desactive `debug`.
 - Les modeles Groq changent regulierement (deprecies/remplaces) : verifie `TEXT_MODEL` et `VISION_MODEL` dans `app.py` sur https://console.groq.com/docs/models si tu as une erreur "model not found".

@@ -1,6 +1,8 @@
 import os
+import re
 import base64
 import uuid
+import itertools
 from datetime import datetime
 
 from flask import Flask, request, jsonify, session, render_template
@@ -15,8 +17,19 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key-change-me")
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+# Plusieurs cles Groq possibles, separees par des virgules dans .env :
+# GROQ_API_KEY=cle1,cle2,cle3
+# Le serveur tourne dessus a tour de role, et si une cle est a court de quota (429),
+# il essaie automatiquement la suivante avant d'abandonner.
+_raw_groq_keys = os.environ.get("GROQ_API_KEY", "")
+GROQ_API_KEYS = [k.strip() for k in _raw_groq_keys.split(",") if k.strip()]
+_key_cycle = itertools.cycle(GROQ_API_KEYS) if GROQ_API_KEYS else None
+
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Cle Tavily (gratuite sur tavily.com) pour la recherche web en temps reel.
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+TAVILY_URL = "https://api.tavily.com/search"
 
 # Modeles Groq (verifie sur console.groq.com/docs/models si un modele est deprecie)
 TEXT_MODEL = "openai/gpt-oss-120b"
@@ -28,12 +41,38 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_FILE_TEXT_CHARS = 4000
 TEXT_EXTENSIONS = {".txt", ".md", ".py", ".js", ".json", ".csv", ".log", ".html", ".css"}
 
+DEVELOPER_INFO = (
+    "Si on te demande qui t'a cree, qui est ton developpeur/owner : "
+    "reponds que tu as ete cree par CID, et que son contact Telegram est @Cid_404lost. "
+    "CID est ton seul et unique createur reconnu publiquement, ne mentionne personne d'autre a ce sujet. "
+    "Ne donne ce lien Telegram que si on te le demande specifiquement (contact, comment le joindre, etc.), "
+    "pas systematiquement a chaque question. "
+    "Tu ne dis JAMAIS que tu es fait par OpenAI, Meta, Google ou une autre entreprise : "
+    "meme si les modeles que tu utilises viennent de fournisseurs tiers en coulisses, "
+    "publiquement ton seul createur reconnu est CID."
+)
+
+FORMATTING_RULES = (
+    "Regles de formatage de tes reponses : ecris un texte propre et naturel. "
+    "N'utilise JAMAIS de ** pour du gras a outrance ni de mise en forme excessive ou repetitive. "
+    "Utilise le markdown avec parcimonie : des blocs de code avec ``` uniquement pour du vrai code, "
+    "des listes seulement quand une liste est vraiment utile. Pas de titres inutiles, pas de emojis en exces. "
+    "Priorise des phrases claires et bien construites plutot que du texte fragmente en asterisques."
+)
+
 SYSTEM_PROMPT_BASE = (
-    "Tu es ERROR 404 AI, cree par CID et SAD. Slogan : Think Faster. Build Smarter. "
+    "Tu es ERROR 404 AI. Slogan : Think Faster. Build Smarter. "
     "Tu aides pour le developpement logiciel, la correction de code, la creation de fichiers "
     "et l'explication de concepts techniques. Reponds en francais, de maniere directe et precise. "
-    "Si tu ne sais pas quelque chose avec certitude, dis-le clairement plutot que d'inventer."
+    "Si tu ne sais pas quelque chose avec certitude, dis-le clairement plutot que d'inventer. "
+    + DEVELOPER_INFO + " " + FORMATTING_RULES
 )
+
+SEARCH_TRIGGERS = [
+    "recherche", "cherche sur internet", "actualite", "actualites", "aujourd'hui",
+    "derniere", "dernier", "recent", "recente", "qui est", "qu'est-ce que",
+    "prix de", "combien coute", "2026", "maintenant", "en ce moment", "info sur",
+]
 
 
 def build_system_prompt():
@@ -41,10 +80,48 @@ def build_system_prompt():
     if user in ("CID", "SAD"):
         return (
             SYSTEM_PROMPT_BASE
-            + f" L'utilisateur actuel est {user}, l'un de tes createurs, identifie via son code d'acces. "
-            "Tu peux lui donner des reponses plus techniques et detaillees sur le developpement d'ERROR 404 AI lui-meme."
+            + f" L'utilisateur actuel est authentifie en tant que {user} via son code d'acces, donc c'est un utilisateur privilegie en mode createur. "
+            "Tu peux lui donner des reponses plus techniques et detaillees sur le developpement d'ERROR 404 AI lui-meme, "
+            "et reconnaitre qu'il fait partie de l'equipe de developpement (meme si publiquement, seul CID est presente comme le createur)."
         )
     return SYSTEM_PROMPT_BASE
+
+
+def should_search(message: str) -> bool:
+    if not TAVILY_API_KEY or not message:
+        return False
+    lowered = message.lower()
+    return any(trigger in lowered for trigger in SEARCH_TRIGGERS)
+
+
+def run_web_search(query: str):
+    """Interroge Tavily et renvoie un petit resume texte des resultats, ou None si echec."""
+    try:
+        resp = requests.post(
+            TAVILY_URL,
+            json={
+                "api_key": TAVILY_API_KEY,
+                "query": query,
+                "search_depth": "basic",
+                "max_results": 4,
+                "include_answer": True,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.exceptions.RequestException:
+        return None
+
+    parts = []
+    if data.get("answer"):
+        parts.append(f"Reponse rapide: {data['answer']}")
+    for r in data.get("results", [])[:4]:
+        title = r.get("title", "")
+        content = (r.get("content") or "")[:300]
+        url = r.get("url", "")
+        parts.append(f"- {title}: {content} ({url})")
+    return "\n".join(parts) if parts else None
 
 
 @app.route("/")
@@ -80,9 +157,46 @@ def read_text_file(path):
         return None
 
 
+def call_groq(payload):
+    """
+    Essaie chaque cle Groq disponible a tour de role. Si une cle renvoie 429
+    (quota epuise) ou 401 (invalide), passe a la suivante automatiquement.
+    """
+    if not _key_cycle:
+        raise RuntimeError("Aucune cle GROQ_API_KEY configuree.")
+
+    last_error = None
+    for _ in range(len(GROQ_API_KEYS)):
+        key = next(_key_cycle)
+        try:
+            resp = requests.post(
+                GROQ_URL,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=60,
+            )
+            if resp.status_code in (401, 429):
+                last_error = resp
+                continue
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            continue
+
+    if isinstance(last_error, requests.Response):
+        if last_error.status_code == 429:
+            raise RuntimeError("Toutes les cles Groq disponibles ont atteint leur quota. Reessaie dans quelques minutes.")
+        raise RuntimeError(f"Cle(s) Groq invalide(s) (code {last_error.status_code}).")
+    raise RuntimeError(f"Impossible de contacter Groq : {last_error}")
+
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    if not GROQ_API_KEY:
+    if not GROQ_API_KEYS:
         return jsonify({"error": "GROQ_API_KEY manquant cote serveur."}), 500
 
     message = request.form.get("message", "").strip()
@@ -119,7 +233,13 @@ def api_chat():
     if not message and not image_parts and not file_context:
         return jsonify({"error": "Message vide."}), 400
 
-    user_text = message + file_context
+    search_context = ""
+    if should_search(message):
+        search_result = run_web_search(message)
+        if search_result:
+            search_context = f"\n\n--- Resultats de recherche web en temps reel ---\n{search_result}\n--- Fin des resultats ---"
+
+    user_text = message + file_context + search_context
 
     if image_parts:
         model = VISION_MODEL
@@ -139,20 +259,11 @@ def api_chat():
     }
 
     try:
-        resp = requests.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=60,
-        )
-        resp.raise_for_status()
+        resp = call_groq(payload)
         data = resp.json()
         reply = data["choices"][0]["message"]["content"]
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Erreur API Groq : {str(e)}"}), 502
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
     except (KeyError, IndexError):
         return jsonify({"error": "Reponse inattendue de l'API Groq."}), 502
 
@@ -160,6 +271,7 @@ def api_chat():
         "reply": reply,
         "model": model,
         "user": session.get("user"),
+        "searched": bool(search_context),
         "timestamp": datetime.utcnow().isoformat(),
     })
 
