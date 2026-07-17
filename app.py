@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import base64
 import uuid
 import itertools
@@ -146,24 +147,50 @@ def api_logout():
     return jsonify({"ok": True})
 
 
-PISTON_URL = "https://emkc.org/api/v2/piston/execute"
+WANDBOX_LIST_URL = "https://wandbox.org/api/list.json"
+WANDBOX_COMPILE_URL = "https://wandbox.org/api/compile.json"
 
-# Alias langage affiche par le modele -> nom attendu par Piston
+# Nom du langage cote utilisateur -> champ "language" attendu par Wandbox
 LANGUAGE_ALIASES = {
-    "python": "python", "py": "python",
-    "javascript": "javascript", "js": "javascript", "node": "javascript",
-    "typescript": "typescript", "ts": "typescript",
-    "bash": "bash", "sh": "bash", "shell": "bash",
-    "java": "java",
-    "c": "c",
-    "cpp": "cpp", "c++": "cpp",
-    "csharp": "csharp", "c#": "csharp",
-    "go": "go", "golang": "go",
-    "rust": "rust",
-    "php": "php",
-    "ruby": "ruby",
-    "sql": "sqlite3",
+    "python": "Python", "py": "Python",
+    "javascript": "JavaScript", "js": "JavaScript", "node": "JavaScript",
+    "typescript": "TypeScript", "ts": "TypeScript",
+    "bash": "Bash", "sh": "Bash", "shell": "Bash",
+    "java": "Java",
+    "c": "C",
+    "cpp": "C++", "c++": "C++",
+    "csharp": "C#", "c#": "C#",
+    "go": "Go", "golang": "Go",
+    "rust": "Rust",
+    "php": "PHP",
+    "ruby": "Ruby",
+    "sql": "SQL",
 }
+
+_wandbox_compilers_cache = {"data": None, "fetched_at": 0}
+WANDBOX_CACHE_TTL = 3600  # 1h
+
+
+def get_wandbox_compiler(language_field: str):
+    """Trouve un nom de compilateur Wandbox correspondant au langage demande. Cache 1h en memoire."""
+    now = time.time()
+    if not _wandbox_compilers_cache["data"] or (now - _wandbox_compilers_cache["fetched_at"]) > WANDBOX_CACHE_TTL:
+        try:
+            resp = requests.get(WANDBOX_LIST_URL, timeout=15)
+            resp.raise_for_status()
+            _wandbox_compilers_cache["data"] = resp.json()
+            _wandbox_compilers_cache["fetched_at"] = now
+        except requests.exceptions.RequestException:
+            return None
+
+    candidates = [c for c in _wandbox_compilers_cache["data"] if c.get("language") == language_field]
+    if not candidates:
+        return None
+    # Prefere un compilateur "head" (derniere version), sinon le premier disponible
+    for c in candidates:
+        if "head" in c.get("name", "").lower():
+            return c["name"]
+    return candidates[0]["name"]
 
 
 @app.route("/api/execute", methods=["POST"])
@@ -175,18 +202,18 @@ def api_execute():
     if not code.strip():
         return jsonify({"error": "Aucun code a executer."}), 400
 
-    language = LANGUAGE_ALIASES.get(raw_lang)
-    if not language:
+    language_field = LANGUAGE_ALIASES.get(raw_lang)
+    if not language_field:
         return jsonify({"error": f"Langage '{raw_lang}' non pris en charge pour l'execution."}), 400
+
+    compiler = get_wandbox_compiler(language_field)
+    if not compiler:
+        return jsonify({"error": f"Aucun compilateur disponible pour {language_field} en ce moment."}), 502
 
     try:
         resp = requests.post(
-            PISTON_URL,
-            json={
-                "language": language,
-                "version": "*",
-                "files": [{"content": code}],
-            },
+            WANDBOX_COMPILE_URL,
+            json={"code": code, "compiler": compiler, "save": False},
             timeout=20,
         )
         resp.raise_for_status()
@@ -194,20 +221,17 @@ def api_execute():
     except requests.exceptions.RequestException as e:
         return jsonify({"error": f"Impossible de contacter le service d'execution : {e}"}), 502
 
-    run = result.get("run", {})
-    compile_step = result.get("compile", {})
-
     output = ""
-    if compile_step and compile_step.get("stderr"):
-        output += f"[compilation]\n{compile_step['stderr']}\n"
-    output += run.get("stdout", "") or ""
-    if run.get("stderr"):
-        output += ("\n" if output else "") + f"[erreur]\n{run['stderr']}"
+    if result.get("compiler_error"):
+        output += f"[compilation]\n{result['compiler_error']}\n"
+    output += result.get("program_output", "") or ""
+    if result.get("program_error"):
+        output += ("\n" if output else "") + f"[erreur]\n{result['program_error']}"
 
     return jsonify({
         "output": output.strip() or "(aucune sortie)",
-        "exit_code": run.get("code"),
-        "language": language,
+        "exit_code": result.get("status"),
+        "language": language_field,
     })
 
 
