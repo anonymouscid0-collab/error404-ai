@@ -61,12 +61,23 @@ FORMATTING_RULES = (
     "Priorise des phrases claires et bien construites plutot que du texte fragmente en asterisques."
 )
 
+FILE_GENERATION_RULES = (
+    "Quand on te demande un fichier telechargeable (PDF, document Word/DOCX, ou une archive ZIP d'un projet), "
+    "ne decris pas juste le contenu en texte normal : utilise un bloc special avec cette syntaxe exacte : "
+    "```file:pdf:nom-du-fichier.pdf\ncontenu texte du document ici\n``` pour un PDF, "
+    "```file:docx:nom-du-fichier.docx\ncontenu texte ici\n``` pour un document Word. "
+    "Pour un ZIP contenant plusieurs fichiers (ex: un projet complet), utilise "
+    "```file:zip:nom-du-projet.zip\n[{\"name\": \"app.py\", \"content\": \"...\"}, {\"name\": \"README.md\", \"content\": \"...\"}]\n``` "
+    "ou le contenu est un tableau JSON valide de fichiers avec leur nom et contenu texte. "
+    "N'utilise cette syntaxe QUE quand un vrai fichier telechargeable est demande, jamais pour du code normal a executer."
+)
+
 SYSTEM_PROMPT_BASE = (
     "Tu es ERROR 404 AI. Slogan : Think Faster. Build Smarter. "
     "Tu aides pour le developpement logiciel, la correction de code, la creation de fichiers "
     "et l'explication de concepts techniques. Reponds en francais, de maniere directe et precise. "
     "Si tu ne sais pas quelque chose avec certitude, dis-le clairement plutot que d'inventer. "
-    + DEVELOPER_INFO + " " + FORMATTING_RULES
+    + DEVELOPER_INFO + " " + FORMATTING_RULES + " " + FILE_GENERATION_RULES
 )
 
 SEARCH_TRIGGERS = [
@@ -379,6 +390,80 @@ def api_chat():
         "searched": bool(search_context),
         "timestamp": datetime.utcnow().isoformat(),
     })
+
+
+GENERATED_DIR = os.path.join(os.path.dirname(__file__), "generated")
+os.makedirs(GENERATED_DIR, exist_ok=True)
+_generated_tokens = {}
+
+
+def make_pdf(filename, text):
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    safe_text = text.encode("latin-1", "replace").decode("latin-1")
+    for line in safe_text.split("\n"):
+        pdf.multi_cell(0, 8, line)
+    path = os.path.join(GENERATED_DIR, filename)
+    pdf.output(path)
+    return path
+
+
+def make_docx(filename, text):
+    import docx
+    doc = docx.Document()
+    for line in text.split("\n"):
+        doc.add_paragraph(line)
+    path = os.path.join(GENERATED_DIR, filename)
+    doc.save(path)
+    return path
+
+
+def make_zip(filename, files):
+    import zipfile
+    path = os.path.join(GENERATED_DIR, filename)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            name = f.get("name", "fichier.txt")
+            content = f.get("content", "")
+            zf.writestr(name, content)
+    return path
+
+
+@app.route("/api/generate-file", methods=["POST"])
+def api_generate_file():
+    data = request.get_json(silent=True) or {}
+    file_type = (data.get("type") or "").strip().lower()
+    raw_name = secure_filename(data.get("filename") or f"fichier.{file_type}") or f"fichier.{file_type}"
+
+    ext = f".{file_type}"
+    filename = raw_name if raw_name.lower().endswith(ext) else f"{raw_name}{ext}"
+
+    try:
+        if file_type == "pdf":
+            path = make_pdf(filename, data.get("content", ""))
+        elif file_type == "docx":
+            path = make_docx(filename, data.get("content", ""))
+        elif file_type == "zip":
+            path = make_zip(filename, data.get("files", []))
+        else:
+            return jsonify({"error": f"Type de fichier '{file_type}' non pris en charge."}), 400
+    except Exception as e:
+        return jsonify({"error": f"Erreur de generation : {e}"}), 500
+
+    token = uuid.uuid4().hex
+    _generated_tokens[token] = path
+    return jsonify({"download_url": f"/api/download/{token}", "filename": filename})
+
+
+@app.route("/api/download/<token>")
+def api_download(token):
+    from flask import send_file
+    path = _generated_tokens.get(token)
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "Lien expire ou invalide."}), 404
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
 if __name__ == "__main__":

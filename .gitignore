@@ -1,5 +1,7 @@
 .env
 uploads/*
 !uploads/.gitkeep
+generated/*
+!generated/.gitkeep
 __pycache__/
 *.pyc

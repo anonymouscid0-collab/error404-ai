@@ -192,6 +192,16 @@
   .run-btn:disabled{opacity:0.5; cursor:default;}
   .run-output{margin:0; padding:10px; border-top:1px dashed var(--line); background:var(--void);
     font-size:12px; font-family:var(--mono); white-space:pre-wrap; color:var(--cyan);}
+
+  .file-card{display:flex; align-items:center; gap:12px; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:12px 14px; margin:8px 0;}
+  .file-icon{font-size:22px; flex-shrink:0;}
+  .file-info{flex:1; min-width:0;}
+  .file-name{font-size:13px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .file-sub{font-size:10.5px; color:var(--ink-dim); margin-top:2px;}
+  .dl-btn{background:var(--grad); border:none; color:#050507; font-weight:700; font-size:11.5px; border-radius:8px;
+    padding:7px 12px; cursor:pointer; flex-shrink:0;}
+  .dl-btn:disabled{opacity:0.6; cursor:default;}
   .code-block pre{margin:0; padding:10px; overflow-x:auto; font-size:12px; line-height:1.5;}
   .inline-code{background:var(--void); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:12.5px;}
 </style>
@@ -403,8 +413,18 @@
 
   function renderMarkdown(text){
     if(!text) return '';
+    // blocs de fichier a generer et telecharger : ```file:type:nom.ext ... ```
+    let html = escapeHtml(text).replace(/```file:(\w+):([^\n]+)\n?([\s\S]*?)```/g, (m, ftype, fname, fcontent) => {
+      const id = 'file_' + Math.random().toString(36).slice(2, 9);
+      return `<div class="file-card" id="${id}" data-type="${ftype.trim()}" data-filename="${fname.trim()}">` +
+             `<div class="file-icon">📄</div>` +
+             `<div class="file-info"><div class="file-name">${fname.trim()}</div><div class="file-sub">${ftype.trim().toUpperCase()} — prêt à générer</div></div>` +
+             `<button class="dl-btn" data-target="${id}">Télécharger</button>` +
+             `<textarea class="file-raw-content" hidden>${fcontent}</textarea>` +
+             `</div>`;
+    });
     // blocs de code ```...```
-    let html = escapeHtml(text).replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+    html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
       const id = 'code_' + Math.random().toString(36).slice(2, 9);
       const langLower = (lang || '').toLowerCase();
       const runnable = RUNNABLE_LANGS.includes(langLower);
@@ -460,6 +480,50 @@
         } finally {
           btn.disabled = false;
           btn.textContent = old;
+        }
+      });
+    });
+    container.querySelectorAll('.dl-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const card = document.getElementById(btn.dataset.target);
+        if(!card) return;
+        const ftype = card.dataset.type;
+        const fname = card.dataset.filename;
+        const rawContent = card.querySelector('.file-raw-content').value;
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = 'Génération...';
+        try{
+          const payload = { type: ftype, filename: fname };
+          if(ftype === 'zip'){
+            payload.files = JSON.parse(rawContent);
+          } else {
+            payload.content = rawContent;
+          }
+          const res = await fetch('/api/generate-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if(res.ok && data.download_url){
+            const a = document.createElement('a');
+            a.href = data.download_url;
+            a.download = data.filename || fname;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            btn.textContent = 'Téléchargé ✓';
+          } else {
+            btn.textContent = 'Erreur';
+            card.querySelector('.file-sub').textContent = data.error || 'échec de génération';
+          }
+        } catch(err){
+          btn.textContent = 'Erreur';
+          card.querySelector('.file-sub').textContent = 'connexion impossible';
+        } finally {
+          btn.disabled = false;
+          setTimeout(() => { btn.textContent = old; }, 2500);
         }
       });
     });
