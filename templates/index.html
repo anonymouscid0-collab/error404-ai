@@ -202,6 +202,10 @@
   .dl-btn{background:var(--grad); border:none; color:#050507; font-weight:700; font-size:11.5px; border-radius:8px;
     padding:7px 12px; cursor:pointer; flex-shrink:0;}
   .dl-btn:disabled{opacity:0.6; cursor:default;}
+
+  .copy-all-btn{display:block; margin-top:10px; background:var(--panel-2); border:1px solid var(--line);
+    color:var(--ink-dim); font-size:10.5px; border-radius:8px; padding:5px 10px; cursor:pointer;}
+  .copy-all-btn:hover{border-color:var(--cyan); color:var(--cyan);}
   .code-block pre{margin:0; padding:10px; overflow-x:auto; font-size:12px; line-height:1.5;}
   .inline-code{background:var(--void); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:12.5px;}
 </style>
@@ -388,21 +392,34 @@
     });
   }
 
-  function addMsg(text, cls, attachments = []){
+  function addMsg(text, cls, attachments = [], persist = true){
     if(welcome.style.display !== 'none'){ welcome.style.display = 'none'; chatInner.style.display = 'flex'; }
     const div = document.createElement('div');
     div.className = 'msg ' + cls;
     let attachHtml = '';
     if(attachments.length){
       attachHtml = '<div class="attach-preview">' + attachments.map(a =>
-        a.type === 'image' ? `<img class="img-thumb" src="${a.url}">` : `<div class="file-chip">📄 ${a.name}</div>`
+        a.type === 'image' && a.url ? `<img class="img-thumb" src="${a.url}">` : `<div class="file-chip">📄 ${a.name}</div>`
       ).join('') + '</div>';
     }
     const bodyHtml = cls === 'bot' ? renderMarkdown(text || '') : escapeHtml(text || '').replace(/\n/g, '<br>');
-    div.innerHTML = `<div class="avatar">${cls === 'bot' ? 'E4' : 'TOI'}</div><div class="bubble">${attachHtml}${bodyHtml}</div>`;
+    const copyAllBtn = cls === 'bot' ? `<button class="copy-all-btn">Copier tout</button>` : '';
+    div.innerHTML = `<div class="avatar">${cls === 'bot' ? 'E4' : 'TOI'}</div><div class="bubble">${attachHtml}${bodyHtml}${copyAllBtn}</div>`;
     chatInner.appendChild(div);
     attachCopyHandlers(div);
     chatArea.scrollTop = chatArea.scrollHeight;
+
+    if(persist){
+      if(activeConv.messages.length === 0 && cls === 'user' && text && text.trim()){
+        activeConv.title = text.trim().slice(0, 42) + (text.trim().length > 42 ? '…' : '');
+      }
+      activeConv.messages.push({
+        cls, text,
+        attachments: attachments.map(a => ({ type: a.type, name: a.name })) // pas d'URL blob (perdue au rechargement)
+      });
+      saveStore();
+      renderHistoryList();
+    }
   }
 
   function escapeHtml(str){
@@ -444,6 +461,19 @@
   }
 
   function attachCopyHandlers(container){
+    const copyAllBtn = container.querySelector('.copy-all-btn');
+    if(copyAllBtn){
+      copyAllBtn.addEventListener('click', () => {
+        const bubble = copyAllBtn.closest('.bubble');
+        const clone = bubble.cloneNode(true);
+        clone.querySelectorAll('.copy-btn, .run-btn, .dl-btn, .copy-all-btn, .code-head, .run-output, .file-raw-content').forEach(el => el.remove());
+        navigator.clipboard.writeText(clone.innerText.trim()).then(() => {
+          const old = copyAllBtn.textContent;
+          copyAllBtn.textContent = 'Copié !';
+          setTimeout(() => { copyAllBtn.textContent = old; }, 1500);
+        });
+      });
+    }
     container.querySelectorAll('.copy-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const target = document.getElementById(btn.dataset.target);
@@ -528,6 +558,81 @@
       });
     });
   }
+  // ---------- memoire de conversation (localStorage, par navigateur) ----------
+  const STORAGE_KEY = 'error404ai_convos_v1';
+  let store = { conversations: [], activeId: null };
+  let activeConv = null;
+
+  function loadStore(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw) store = JSON.parse(raw);
+    } catch(e){ store = { conversations: [], activeId: null }; }
+    if(!store.conversations || !store.conversations.length){
+      createNewConversation();
+    } else {
+      activeConv = store.conversations.find(c => c.id === store.activeId) || store.conversations[0];
+      store.activeId = activeConv.id;
+    }
+  }
+
+  function saveStore(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch(e){}
+  }
+
+  function createNewConversation(){
+    const conv = { id: 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6), title: 'Nouvelle conversation', messages: [] };
+    store.conversations.unshift(conv);
+    store.activeId = conv.id;
+    activeConv = conv;
+    saveStore();
+    return conv;
+  }
+
+  function renderHistoryList(){
+    const historyEl = document.querySelector('.history');
+    if(!historyEl) return;
+    const items = store.conversations.map(c =>
+      `<div class="hist-item ${c.id===activeConv.id?'active':''}" data-id="${c.id}">${escapeHtml(c.title || 'Conversation')}</div>`
+    ).join('');
+    historyEl.innerHTML = `<div class="label">Récents</div>${items}`;
+    historyEl.querySelectorAll('.hist-item').forEach(el => {
+      el.addEventListener('click', () => switchConversation(el.dataset.id));
+    });
+  }
+
+  function switchConversation(id){
+    const conv = store.conversations.find(c => c.id === id);
+    if(!conv) return;
+    store.activeId = id;
+    activeConv = conv;
+    saveStore();
+    redrawActiveConversation();
+    shutDrawer();
+  }
+
+  function redrawActiveConversation(){
+    chatInner.innerHTML = '';
+    if(!activeConv.messages.length){
+      chatInner.style.display = 'none';
+      welcome.style.display = 'flex';
+    } else {
+      welcome.style.display = 'none';
+      chatInner.style.display = 'flex';
+      activeConv.messages.forEach(m => addMsg(m.text, m.cls, m.attachments || [], false));
+    }
+    renderHistoryList();
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
+
+  function getHistoryForModel(){
+    return activeConv.messages
+      .filter(m => m.text && m.text.trim())
+      .slice(-16)
+      .map(m => ({ role: m.cls === 'user' ? 'user' : 'assistant', content: m.text }));
+  }
+
+  // ---------- typing / send ----------
   function addTypingIndicator(){
     const div = document.createElement('div');
     div.className = 'msg bot';
@@ -545,11 +650,13 @@
     const text = textInput.value.trim();
     if(!text && pending.length === 0) return;
 
+    const historyToSend = JSON.stringify(getHistoryForModel());
     const attachmentsForDisplay = pending;
     addMsg(text, 'user', attachmentsForDisplay);
 
     const formData = new FormData();
     formData.append('message', text);
+    formData.append('history', historyToSend);
     pending.forEach(p => { if(p.file) formData.append('files', p.file); });
 
     pending = []; renderPreview();
@@ -574,9 +681,13 @@
   textInput.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); handleSend(); } });
 
   document.getElementById('newChatBtn').addEventListener('click', () => {
-    chatInner.innerHTML = ''; chatInner.style.display = 'none'; welcome.style.display = 'flex';
+    createNewConversation();
+    redrawActiveConversation();
     shutDrawer();
   });
+
+  loadStore();
+  redrawActiveConversation();
 </script>
 
 </body>

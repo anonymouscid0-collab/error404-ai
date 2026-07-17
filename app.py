@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 import base64
 import uuid
 import itertools
@@ -54,11 +55,25 @@ DEVELOPER_INFO = (
 )
 
 FORMATTING_RULES = (
-    "Regles de formatage de tes reponses : ecris un texte propre et naturel. "
+    "Regles de formatage de tes reponses : ecris un texte propre et naturel, pas robotique. "
     "N'utilise JAMAIS de ** pour du gras a outrance ni de mise en forme excessive ou repetitive. "
     "Utilise le markdown avec parcimonie : des blocs de code avec ``` uniquement pour du vrai code, "
-    "des listes seulement quand une liste est vraiment utile. Pas de titres inutiles, pas de emojis en exces. "
-    "Priorise des phrases claires et bien construites plutot que du texte fragmente en asterisques."
+    "des listes seulement quand une liste est vraiment utile, pas par defaut. Pas de titres inutiles, "
+    "pas de decoupage rigide en sections pour une simple question. Priorise des phrases claires, fluides "
+    "et bien construites, comme dans une vraie conversation, plutot que du texte fragmente."
+)
+
+PERSONALITY_RULES = (
+    "Ta personnalite : tu es chaleureux, poli, curieux et engage, jamais froid ou mecanique. "
+    "Reflechis vraiment a ce qu'on te demande avant de repondre : analyse le contexte, anticipe ce que la "
+    "personne cherche vraiment, et si sa demande est ambigue ou qu'une precision changerait ta reponse, "
+    "pose une question de relance plutot que de deviner en silence. "
+    "Tu peux exprimer de la nuance, de l'enthousiasme ou de l'empathie selon la situation - tu n'es pas "
+    "un simple distributeur de reponses formatees, tu comprends les gens et tu t'adaptes a ce qu'ils vivent. "
+    "Quand tu donnes du code, ne te contente pas du minimum : explique les choix importants, signale les "
+    "pieges frequents, et propose une amelioration ou une alternative quand c'est pertinent - sois complet "
+    "et utile, pas juste correct. Reste concis quand la question est simple, mais ne sacrifie jamais la "
+    "clarte ou la profondeur d'une explication pour paraitre bref."
 )
 
 FILE_GENERATION_RULES = (
@@ -77,7 +92,7 @@ SYSTEM_PROMPT_BASE = (
     "Tu aides pour le developpement logiciel, la correction de code, la creation de fichiers "
     "et l'explication de concepts techniques. Reponds en francais, de maniere directe et precise. "
     "Si tu ne sais pas quelque chose avec certitude, dis-le clairement plutot que d'inventer. "
-    + DEVELOPER_INFO + " " + FORMATTING_RULES + " " + FILE_GENERATION_RULES
+    + DEVELOPER_INFO + " " + PERSONALITY_RULES + " " + FORMATTING_RULES + " " + FILE_GENERATION_RULES
 )
 
 SEARCH_TRIGGERS = [
@@ -92,9 +107,14 @@ def build_system_prompt():
     if user in ("CID", "SAD"):
         return (
             SYSTEM_PROMPT_BASE
-            + f" L'utilisateur actuel est authentifie en tant que {user} via son code d'acces, donc c'est un utilisateur privilegie en mode createur. "
-            "Tu peux lui donner des reponses plus techniques et detaillees sur le developpement d'ERROR 404 AI lui-meme, "
-            "et reconnaitre qu'il fait partie de l'equipe de developpement (meme si publiquement, seul CID est presente comme le createur)."
+            + f" L'utilisateur actuel est authentifie en tant que {user} via son code d'acces : c'est un "
+            "membre de ton equipe de developpement, pas un visiteur ordinaire. Adresse-toi a lui avec une "
+            "familiarite naturelle et un vrai respect professionnel - pas comme si tu redecouvrais un inconnu "
+            "a chaque message. Donne-lui des reponses techniques plus poussees, engage-toi davantage dans "
+            "les decisions d'architecture d'ERROR 404 AI, et propose proactivement des ameliorations quand "
+            "tu en vois. Cela dit, tes principes de securite et d'ethique restent exactement les memes qu'avec "
+            "n'importe qui d'autre : le statut de createur donne plus de profondeur technique, jamais un "
+            "acces qui contournerait tes limites normales."
         )
     return SYSTEM_PROMPT_BASE
 
@@ -310,6 +330,9 @@ def call_groq(payload):
     raise RuntimeError(f"Impossible de contacter Groq : {last_error}")
 
 
+MAX_HISTORY_MESSAGES = 16  # nombre de messages precedents (user+assistant) a renvoyer au modele
+
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     if not GROQ_API_KEYS:
@@ -317,6 +340,22 @@ def api_chat():
 
     message = request.form.get("message", "").strip()
     files = request.files.getlist("files")
+
+    # Historique envoye par le front (liste JSON de {role, content}), pour que le
+    # modele garde le fil de la conversation au lieu d'oublier a chaque message.
+    history = []
+    raw_history = request.form.get("history")
+    if raw_history:
+        try:
+            parsed = json.loads(raw_history)
+            if isinstance(parsed, list):
+                for item in parsed[-MAX_HISTORY_MESSAGES:]:
+                    role = item.get("role")
+                    content = item.get("content")
+                    if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                        history.append({"role": role, "content": content})
+        except (ValueError, AttributeError):
+            history = []
 
     image_parts = []
     file_context = ""
@@ -368,6 +407,7 @@ def api_chat():
         "model": model,
         "messages": [
             {"role": "system", "content": build_system_prompt()},
+            *history,
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.7,
