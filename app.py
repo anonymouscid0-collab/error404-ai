@@ -171,8 +171,12 @@ _wandbox_compilers_cache = {"data": None, "fetched_at": 0}
 WANDBOX_CACHE_TTL = 3600  # 1h
 
 
-def get_wandbox_compiler(language_field: str):
-    """Trouve un nom de compilateur Wandbox correspondant au langage demande. Cache 1h en memoire."""
+def get_wandbox_compilers(language_field: str, limit=3):
+    """
+    Renvoie jusqu'a `limit` noms de compilateurs Wandbox pour ce langage, tries en
+    preferant les versions stables (les versions "head"/nightly sont parfois cassees
+    cote Wandbox, donc elles passent en dernier recours).
+    """
     now = time.time()
     if not _wandbox_compilers_cache["data"] or (now - _wandbox_compilers_cache["fetched_at"]) > WANDBOX_CACHE_TTL:
         try:
@@ -181,16 +185,16 @@ def get_wandbox_compiler(language_field: str):
             _wandbox_compilers_cache["data"] = resp.json()
             _wandbox_compilers_cache["fetched_at"] = now
         except requests.exceptions.RequestException:
-            return None
+            return []
 
     candidates = [c for c in _wandbox_compilers_cache["data"] if c.get("language") == language_field]
     if not candidates:
-        return None
-    # Prefere un compilateur "head" (derniere version), sinon le premier disponible
-    for c in candidates:
-        if "head" in c.get("name", "").lower():
-            return c["name"]
-    return candidates[0]["name"]
+        return []
+
+    stable = [c["name"] for c in candidates if "head" not in c.get("name", "").lower() and "nightly" not in c.get("name", "").lower()]
+    head = [c["name"] for c in candidates if c["name"] not in stable]
+    ordered = stable + head
+    return ordered[:limit] if ordered else [candidates[0]["name"]]
 
 
 @app.route("/api/execute", methods=["POST"])
@@ -206,21 +210,33 @@ def api_execute():
     if not language_field:
         return jsonify({"error": f"Langage '{raw_lang}' non pris en charge pour l'execution."}), 400
 
-    compiler = get_wandbox_compiler(language_field)
-    if not compiler:
+    compilers = get_wandbox_compilers(language_field)
+    if not compilers:
         return jsonify({"error": f"Aucun compilateur disponible pour {language_field} en ce moment."}), 502
 
-    try:
-        resp = requests.post(
-            WANDBOX_COMPILE_URL,
-            json={"code": code, "compiler": compiler, "save": False},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Impossible de contacter le service d'execution : {e}"}), 502
+    INFRA_ERROR_MARKERS = ("failed to exec pid1", "catatonit", "No such file or directory")
+    last_result = None
+    for compiler in compilers:
+        try:
+            resp = requests.post(
+                WANDBOX_COMPILE_URL,
+                json={"code": code, "compiler": compiler, "save": False},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Impossible de contacter le service d'execution : {e}"}), 502
 
+        combined = (result.get("compiler_error", "") or "") + (result.get("program_error", "") or "")
+        if any(marker in combined for marker in INFRA_ERROR_MARKERS):
+            last_result = result
+            continue  # ce compilateur precis est casse cote Wandbox, on essaie le suivant
+
+        last_result = result
+        break
+
+    result = last_result
     output = ""
     if result.get("compiler_error"):
         output += f"[compilation]\n{result['compiler_error']}\n"
