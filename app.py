@@ -146,6 +146,71 @@ def api_logout():
     return jsonify({"ok": True})
 
 
+PISTON_URL = "https://emkc.org/api/v2/piston/execute"
+
+# Alias langage affiche par le modele -> nom attendu par Piston
+LANGUAGE_ALIASES = {
+    "python": "python", "py": "python",
+    "javascript": "javascript", "js": "javascript", "node": "javascript",
+    "typescript": "typescript", "ts": "typescript",
+    "bash": "bash", "sh": "bash", "shell": "bash",
+    "java": "java",
+    "c": "c",
+    "cpp": "cpp", "c++": "cpp",
+    "csharp": "csharp", "c#": "csharp",
+    "go": "go", "golang": "go",
+    "rust": "rust",
+    "php": "php",
+    "ruby": "ruby",
+    "sql": "sqlite3",
+}
+
+
+@app.route("/api/execute", methods=["POST"])
+def api_execute():
+    data = request.get_json(silent=True) or {}
+    raw_lang = (data.get("language") or "").strip().lower()
+    code = data.get("code") or ""
+
+    if not code.strip():
+        return jsonify({"error": "Aucun code a executer."}), 400
+
+    language = LANGUAGE_ALIASES.get(raw_lang)
+    if not language:
+        return jsonify({"error": f"Langage '{raw_lang}' non pris en charge pour l'execution."}), 400
+
+    try:
+        resp = requests.post(
+            PISTON_URL,
+            json={
+                "language": language,
+                "version": "*",
+                "files": [{"content": code}],
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Impossible de contacter le service d'execution : {e}"}), 502
+
+    run = result.get("run", {})
+    compile_step = result.get("compile", {})
+
+    output = ""
+    if compile_step and compile_step.get("stderr"):
+        output += f"[compilation]\n{compile_step['stderr']}\n"
+    output += run.get("stdout", "") or ""
+    if run.get("stderr"):
+        output += ("\n" if output else "") + f"[erreur]\n{run['stderr']}"
+
+    return jsonify({
+        "output": output.strip() or "(aucune sortie)",
+        "exit_code": run.get("code"),
+        "language": language,
+    })
+
+
 def read_text_file(path):
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
