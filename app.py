@@ -178,6 +178,11 @@ def api_auth():
     return jsonify({"ok": False, "error": "Code invalide."}), 401
 
 
+@app.route("/api/me")
+def api_me():
+    return jsonify({"user": session.get("user")})
+
+
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
     session.pop("user", None)
