@@ -8,16 +8,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --void:#07070a;
-    --panel:#0d0d12;
-    --panel-2:#121218;
-    --line:#212129;
+    --void:#050914;
+    --panel:#0b1220;
+    --panel-2:#101a2e;
+    --line:#22314f;
     --red:#ff2140;
     --red-soft:rgba(255,33,64,0.12);
     --cyan:#23e5ff;
     --cyan-soft:rgba(35,229,255,0.1);
-    --ink:#e9e9ee;
-    --ink-dim:#83838f;
+    --ink:#eef1fb;
+    --ink-dim:#8b96b8;
     --grad:linear-gradient(135deg, var(--red), var(--cyan));
     --mono:'JetBrains Mono', monospace;
     --glitch:'Share Tech Mono', monospace;
@@ -313,7 +313,7 @@
   resize(); window.addEventListener('resize', resize);
 
   function draw(){
-    ctx.fillStyle = 'rgba(7,7,10,0.16)'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = 'rgba(5,9,20,0.16)'; ctx.fillRect(0,0,w,h);
     ctx.font = '15px "Share Tech Mono", monospace';
 
     for(let i=0;i<cols;i++){
