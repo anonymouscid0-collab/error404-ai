@@ -286,28 +286,61 @@
 </div>
 
 <script>
-  // binary rain background
+  // fond animé style "code qui tombe" - les mots ERROR et 404 chutent en rouge
+  // neon (comme du code Matrix), melanges a du binaire cyan pour la texture
   const canvas = document.getElementById('rain');
   const ctx = canvas.getContext('2d');
-  let w,h,cols,drops;
+  let w,h,cols,colState;
+  const WORDS = ['ERROR', '404'];
+  const BINARY = '01';
+
+  function makeColumn(){
+    const isWordCol = Math.random() > 0.55; // la majorite des colonnes tombent en mots ERROR/404
+    return {
+      y: Math.random() * -40,
+      isWord: isWordCol,
+      word: isWordCol ? WORDS[Math.floor(Math.random()*WORDS.length)] : null,
+      charIndex: 0,
+      speed: 0.8 + Math.random()*0.9
+    };
+  }
+
   function resize(){
     w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight;
-    cols = Math.floor(w/22); drops = new Array(cols).fill(0).map(()=> Math.random()*-h/22);
+    cols = Math.floor(w/20);
+    colState = new Array(cols).fill(0).map(makeColumn);
   }
   resize(); window.addEventListener('resize', resize);
-  const glyphs = '01ERROR404';
+
   function draw(){
-    ctx.fillStyle = 'rgba(7,7,10,0.14)'; ctx.fillRect(0,0,w,h);
-    ctx.font = '14px monospace';
+    ctx.fillStyle = 'rgba(7,7,10,0.16)'; ctx.fillRect(0,0,w,h);
+    ctx.font = '15px "Share Tech Mono", monospace';
+
     for(let i=0;i<cols;i++){
-      const isRed = Math.random() > 0.85;
-      ctx.fillStyle = isRed ? 'rgba(255,33,64,0.45)' : 'rgba(35,229,255,0.28)';
-      ctx.fillText(glyphs[Math.floor(Math.random()*glyphs.length)], i*22, drops[i]*22);
-      if(drops[i]*22 > h && Math.random() > 0.975) drops[i] = 0;
-      drops[i]++;
+      const col = colState[i];
+      const x = i*20;
+
+      if(col.isWord){
+        const ch = col.word[col.charIndex % col.word.length];
+        ctx.shadowColor = 'rgba(255,33,64,0.9)';
+        ctx.shadowBlur = 9;
+        ctx.fillStyle = 'rgba(255,45,70,0.9)';
+        ctx.fillText(ch, x, col.y);
+        ctx.shadowBlur = 0;
+        col.charIndex++;
+      } else {
+        ctx.fillStyle = 'rgba(35,229,255,0.32)';
+        ctx.fillText(BINARY[Math.floor(Math.random()*BINARY.length)], x, col.y);
+      }
+
+      col.y += col.speed * 8;
+      if(col.y > h + 20 && Math.random() > 0.96){
+        colState[i] = makeColumn();
+        colState[i].y = Math.random() * -80;
+      }
     }
   }
-  setInterval(draw, 60);
+  setInterval(draw, 55);
 
   // ---------- access code (in drawer) ----------
   // La verification reelle se fait cote serveur (/api/auth), contre un hash bcrypt.
